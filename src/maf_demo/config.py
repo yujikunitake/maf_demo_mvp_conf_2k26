@@ -20,6 +20,7 @@ class Settings:
     foundry_api_version: str
     embedding_deployment: str
     chat_deployment: str
+    chat_deployment_alt: str
     embedding_dimensions: int
     search_endpoint: str
     search_api_key: str
@@ -36,6 +37,7 @@ def load_settings() -> Settings:
         foundry_api_version=_require("FOUNDRY_API_VERSION"),
         embedding_deployment=_require("EMBEDDING_DEPLOYMENT"),
         chat_deployment=_require("CHAT_DEPLOYMENT"),
+        chat_deployment_alt=_require("CHAT_DEPLOYMENT_ALT"),
         embedding_dimensions=int(_require("EMBEDDING_DIMENSIONS")),
         search_endpoint=_require("SEARCH_ENDPOINT"),
         search_api_key=_require("SEARCH_API_KEY"),
