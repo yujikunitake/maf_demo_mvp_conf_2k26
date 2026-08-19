@@ -1,8 +1,10 @@
 import sys
 
 from dataclasses import dataclass
+from typing import Any
 
 from openai import AzureOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from maf_demo.config import Settings, load_settings
 
@@ -20,19 +22,27 @@ def _client(settings: Settings) -> AzureOpenAI:
         api_key=settings.foundry_api_key
     )
 
-def chat(prompt: str, deployment: str | None = None, system: str | None = None) -> ChatResponse:
+def chat(
+    prompt: str,
+    deployment: str | None = None,
+    system: str | None = None,
+    response_format: dict | None = None,
+) -> ChatResponse:
     settings = load_settings()
     model = deployment or settings.chat_deployment
 
-    messages = []
+    messages: list[ChatCompletionMessageParam] = []
 
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
+    kwargs: dict[str, Any] = {"response_format": response_format} if response_format else {}
+
     response = _client(settings).chat.completions.create(
         model=model,
-        messages=messages
+        messages=messages,
+        **kwargs
     )
 
     content = response.choices[0].message.content
