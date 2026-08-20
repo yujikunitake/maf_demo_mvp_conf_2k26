@@ -28,6 +28,7 @@ class Settings:
     vector_profile_name: str
     hnsw_config_name: str
     semantic_config_name: str
+    esp32_host: str | None
 
 
 def load_settings() -> Settings:
@@ -44,5 +45,6 @@ def load_settings() -> Settings:
         search_index_name=_require("SEARCH_INDEX_NAME"),
         vector_profile_name=_require("VECTOR_PROFILE_NAME"),
         hnsw_config_name=_require("HNSW_CONFIG_NAME"),
-        semantic_config_name=_require("SEMANTIC_CONFIG_NAME")
+        semantic_config_name=_require("SEMANTIC_CONFIG_NAME"),
+        esp32_host=os.getenv("ESP32_HOST")
     )
