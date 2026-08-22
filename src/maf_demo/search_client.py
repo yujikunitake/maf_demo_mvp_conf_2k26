@@ -1,4 +1,3 @@
-import sys
 from dataclasses import dataclass
 
 from azure.core.credentials import AzureKeyCredential
@@ -26,14 +25,7 @@ def _embed_query(client: AzureOpenAI, deployment: str, query: str) -> list[float
     return response.data[0].embedding
 
 def retrieve(query: str, top_k: int = 5, source: str | None = None) -> list[Chunk]:
-    """Busca híbrida (vetorial + semântica) no manual.
-
-    Args:
-        query: pergunta/descrição do incidente.
-        top_k: número de chunks a retornar.
-        source: se informado, restringe a busca a um único arquivo do manual
-            (ex.: "01-runbook-triagem-incidentes.md"), via filtro OData no índice.
-    """
+    """Busca híbrida (vetorial + semântica) no manual; `source` filtra a um único arquivo."""
     settings = load_settings()
 
     embedding_client = AzureOpenAI(
@@ -81,12 +73,7 @@ def retrieve(query: str, top_k: int = 5, source: str | None = None) -> list[Chun
 
 
 async def aretrieve(query: str, top_k: int = 5, source: str | None = None) -> list[Chunk]:
-    """Igual a `retrieve`, mas assíncrona (clientes async do Search/OpenAI).
-
-    Usada onde várias buscas rodam concorrentemente (ex.: especialistas do coordenador) —
-    `retrieve` é síncrona e bloquearia o event loop, serializando buscas que deveriam
-    rodar em paralelo.
-    """
+    """Igual a `retrieve`, mas assíncrona — usada onde buscas rodam em paralelo (especialistas)."""
     settings = load_settings()
 
     async with (

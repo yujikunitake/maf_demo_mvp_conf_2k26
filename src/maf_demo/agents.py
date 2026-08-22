@@ -1,25 +1,3 @@
-"""Agente coordenador de triagem + especialistas por documento do manual.
-
-Desenho: o coordenador (gpt-5-mini, com tool-calling real) decide quais especialistas
-consultar para cada incidente. Cada especialista é escopado em UM documento do manual —
-o retrieval é determinístico em código (sempre roda, filtrado por `source`), e o modelo
-só interpreta o contexto já injetado.
-
-Nota: os especialistas não usam tool-calling interno de propósito — o retrieval de cada um
-é sempre o mesmo (buscar no seu documento), então não há decisão nenhuma a delegar pro modelo
-ali; só o coordenador precisa decidir algo, e só ele usa tools.
-
-Nota 2: testamos usar Phi-4-mini-instruct (CHAT_DEPLOYMENT_ALT) nos especialistas pra ganhar
-custo/latência, mas esse deployment (a) rejeita requisições com `tools` via Responses API
-(erro 400) e (b) travou por >90s sem responder em teste isolado, mesmo sem tools — não é
-confiável o bastante pra demo ao vivo. Os especialistas também rodam em gpt-5-mini.
-
-Nota 3: o recurso Foundry (tier gratuito/estudante) trava (sem erro, sem timeout) quando recebe
-muitas chamadas concorrentes ao gpt-5-mini — testado e reproduzido com 4 chamadas simultâneas.
-Por isso as chamadas aos especialistas passam por um semáforo (`_LLM_CONCURRENCY`) limitando
-quantas rodam ao mesmo tempo, com timeout por chamada pra falhar rápido em vez de travar a demo.
-"""
-
 import asyncio
 from dataclasses import dataclass
 
@@ -33,15 +11,11 @@ from maf_demo.search_client import aretrieve
 
 settings = load_settings()
 
-# Limite de chamadas concorrentes ao Foundry (ver Nota 3 acima) e timeout de segurança
-# por chamada de especialista, pra um travamento não derrubar a demo inteira.
 _LLM_CONCURRENCY = asyncio.Semaphore(2)
 _SPECIALIST_TIMEOUT_SECONDS = 45
 
-# Uma única credencial compartilhada por todos os clients (coordenador + 5 especialistas).
-# `AzureCliCredential` cacheia o token por instância — usar uma por client (6 no total)
-# significa até 6 chamadas redundantes a `az account get-access-token` (~1,6s cada, medido)
-# em vez de reaproveitar o mesmo token.
+# Credencial única compartilhada por todos os clients — evita repetir
+# `az account get-access-token` (~1,6s) por client.
 _CREDENTIAL = AzureCliCredential()
 
 
@@ -119,10 +93,8 @@ def _build_specialist_tool(spec: Specialist) -> FunctionTool:
             except asyncio.TimeoutError:
                 return f"[{spec.tool_name} não respondeu a tempo — ignore esta fonte.]"
             except Exception as e:
-                # Cobre, entre outros, o filtro de conteúdo/jailbreak do Azure OpenAI: a lib
-                # agent_framework_openai quebra com um ValueError ao tentar montar a exceção
-                # própria (`'ContentFiltered' is not a valid ContentFilterCodes`), então captura
-                # genérico aqui em vez de depender do tipo de exceção "certo".
+                # Filtro de conteúdo do Azure faz a lib agent_framework_openai quebrar com
+                # ValueError em vez de propagar algo catável — captura genérico aqui.
                 return f"[{spec.tool_name} falhou ({e}) — ignore esta fonte.]"
 
         return str(response)
