@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "agent-framework>=1.11.0",
+    "agent-framework-devui>=1.0.0b260721",
     "agent-framework-foundry>=1.10.3",
     "azure-identity>=1.25.3",
     "azure-search-documents>=12.0.0",
