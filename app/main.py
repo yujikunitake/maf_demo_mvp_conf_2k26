@@ -4,20 +4,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import requests
-from agent_framework import Agent
-from agent_framework.foundry import FoundryChatClient, FoundryChatOptions
-from azure.identity import AzureCliCredential
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
-from maf_demo.config import load_settings
-from maf_demo.prompts import load_prompt
-from maf_demo.search_client import retrieve
+from maf_demo.agents import build_coordinator_agent
 
-settings = load_settings()
 console = Console()
 
 SEVERITY_STYLE = {
@@ -25,35 +18,7 @@ SEVERITY_STYLE = {
     "SEV-2": "bold yellow",
     "SEV-3": "bold green",
 }
-SEVERITY_LED_COLOR = {"SEV-1": "red", "SEV-2": "yellow", "SEV-3": "green"}
-INDETERMINADO = "indeterminado"
-LED_SEVERITIES = {*SEVERITY_LED_COLOR, INDETERMINADO}
-
-
-def query_manual(questions: str) -> str:
-    chunks = retrieve(questions, top_k=5)
-    return "\n\n".join(f"[Source: {c.source} — {c.section_title}]\n{c.content}" for c in chunks)
-
-
-def trigger_led(severity: str) -> None:
-    if severity == INDETERMINADO:
-        swatch = "".join(f"[on {c}]  [/on {c}]" for c in SEVERITY_LED_COLOR.values())
-        label = "todos os LEDs (severidade indeterminada)"
-    else:
-        color = SEVERITY_LED_COLOR[severity]
-        swatch = f"[on {color}]   [/on {color}]"
-        label = color
-
-    if not settings.esp32_host:
-        console.print(f"  {swatch} [dim]LED simulado (ESP32_HOST não configurado) → {label}[/dim]")
-        return
-
-    try:
-        response = requests.get(f"http://{settings.esp32_host}/severity/{severity}", timeout=3)
-        response.raise_for_status()
-        console.print(f"  {swatch} [dim]LED físico acionado em {settings.esp32_host} → {label}[/dim]")
-    except requests.RequestException as e:
-        console.print(f"  [bold red][ERRO][/bold red] Falha ao acionar LED no ESP32 ({settings.esp32_host}): {e}")
+VALID_SEVERITIES = {*SEVERITY_STYLE, "indeterminado"}
 
 
 def parse_response(text: str) -> dict[str, Any] | None:
@@ -64,30 +29,10 @@ def parse_response(text: str) -> dict[str, Any] | None:
         return None
 
 
-def build_agent() -> Agent[FoundryChatOptions]:
-    client = FoundryChatClient(
-        project_endpoint=settings.foundry_endpoint,
-        model=settings.chat_deployment,
-        credential=AzureCliCredential(),
-    )
-
-    return client.as_agent(
-        name="NimbusFlowTriage",
-        instructions=load_prompt("triage"),
-        tools=[query_manual],
-    )
-
-
 def print_banner() -> None:
-    if settings.esp32_host:
-        mode = f"[bold green][LED FÍSICO][/bold green] ESP32 em [cyan]{settings.esp32_host}[/cyan]"
-    else:
-        mode = "[bold yellow][LED SIMULADO][/bold yellow] nenhum ESP32 configurado (ESP32_HOST)"
-
     console.print(
         Panel.fit(
             "[bold]Assistente de triagem NimbusFlow[/bold]\n"
-            f"{mode}\n"
             "[dim]Descreva o incidente e pressione Enter (Ctrl+C para sair)[/dim]",
             border_style="cyan",
         )
@@ -123,14 +68,12 @@ def print_result(data: dict[str, Any]) -> None:
         )
     )
 
-    if severity in LED_SEVERITIES:
-        trigger_led(severity)
-    else:
-        console.print(f"[dim][AVISO] Severidade desconhecida ({severity}) — LED não acionado[/dim]")
+    if severity not in VALID_SEVERITIES:
+        console.print(f"[dim][AVISO] Severidade desconhecida ({severity})[/dim]")
 
 
 async def main() -> None:
-    agent = build_agent()
+    agent = build_coordinator_agent()
     session = agent.create_session()
 
     print_banner()
@@ -145,8 +88,37 @@ async def main() -> None:
         if not question:
             continue
 
-        with console.status("[dim]Consultando agente...[/dim]", spinner="dots"):
-            response = await agent.run(question, session=session, options={"reasoning": {"effort": "low"}})
+        try:
+            with console.status("[dim]Coordenador consultando especialistas...[/dim]", spinner="dots"):
+                response = await asyncio.wait_for(
+                    agent.run(question, session=session, options={"reasoning": {"effort": "low"}}),
+                    timeout=90,
+                )
+        except asyncio.TimeoutError:
+            console.print(
+                Panel(
+                    "O coordenador demorou mais que o esperado (>90s) — provavelmente o recurso Azure "
+                    "está sobrecarregado no momento. Tenta de novo em alguns segundos.",
+                    title="[bold red]Timeout[/bold red]",
+                    border_style="red",
+                )
+            )
+            continue
+        except Exception as e:
+            # Cobre, entre outros, o filtro de conteúdo/jailbreak do Azure OpenAI: a lib
+            # agent_framework_openai quebra com um ValueError ao montar a exceção própria
+            # em vez de propagar algo específico e catável — captura genérico aqui pra não
+            # derrubar o REPL no meio de uma demo.
+            console.print(
+                Panel(
+                    f"A pergunta não pôde ser processada ({e}). Isso pode ser o filtro de "
+                    "conteúdo do Azure (ex.: tentativa de jailbreak) ou um erro transitório. "
+                    "Tenta reformular a pergunta.",
+                    title="[bold red]Erro[/bold red]",
+                    border_style="red",
+                )
+            )
+            continue
 
         data = parse_response(str(response))
 
